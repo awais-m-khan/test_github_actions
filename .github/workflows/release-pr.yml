@@ -1,0 +1,111 @@
+name: Create Release PR
+
+on:
+  workflow_dispatch: # Trigger manually only
+
+jobs:
+  create-release-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4 # Latest version of checkout
+
+      - name: Set up GitHub CLI
+        uses: actions/setup-gh@v4 # Latest version of setup-gh
+
+      - name: Authenticate GitHub CLI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh auth login --with-token
+
+      - name: Fetch last merge commit from `main`
+        id: last-merge
+        env:
+          GRAPHQL_QUERY: |
+            query($owner: String!, $repo: String!) {
+              repository(owner: $owner, name: $repo) {
+                ref(qualifiedName: "main") {
+                  target {
+                    ... on Commit {
+                      history(first: 1) {
+                        edges {
+                          node {
+                            associatedPullRequests(first: 1) {
+                              edges {
+                                node {
+                                  mergedAt
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+        run: |
+          response=$(gh api graphql -F owner='${{ github.repository_owner }}' \
+            -F repo='${{ github.event.repository.name }}' \
+            -f query="${GRAPHQL_QUERY}")
+          LAST_MERGE=$(echo "$response" | jq -r '.data.repository.ref.target.history.edges[0].node.associatedPullRequests.edges[0].node.mergedAt')
+          echo "last_merge=$LAST_MERGE" >> $GITHUB_ENV
+
+      - name: Fetch merged PRs into `qa` since last release
+        id: get-merged-prs
+        env:
+          GRAPHQL_QUERY: |
+            query($owner: String!, $repo: String!, $lastMergedDate: DateTime!) {
+              repository(owner: $owner, name: $repo) {
+                ref(qualifiedName: "refs/heads/qa") {
+                  target {
+                    ... on Commit {
+                      history(since: $lastMergedDate) {
+                        edges {
+                          node {
+                            associatedPullRequests(first: 10) { # Adjust `first: 10` for pagination
+                              edges {
+                                node {
+                                  title
+                                  number
+                                  url
+                                  headRefName
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+        run: |
+          response=$(gh api graphql -F owner='${{ github.repository_owner }}' \
+            -F repo='${{ github.event.repository.name }}' \
+            -F lastMergedDate="${{ env.last_merge }}" \
+            -f query="${GRAPHQL_QUERY}")
+          PR_LIST=$(echo "$response" | jq -r '.data.repository.ref.target.history.edges[].node.associatedPullRequests.edges[].node | "- [PR #\(.number)](\(.url)) (\(.headRefName))"')
+          echo "pr_list=$PR_LIST" >> $GITHUB_ENV
+
+      - name: Determine release number for the day
+        id: release-number
+        run: |
+          TODAY=$(date +%Y-%m-%d)
+          COUNT=$(gh pr list --search "created:$TODAY is:pr is:open" | wc -l)
+          echo "release_number=$((COUNT + 1))" >> $GITHUB_ENV
+
+      - name: Create Release PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE="Release ${{ steps.release-number.outputs.release_number }} - $(date +%Y-%m-%d)"
+          BODY="### Changes included in this release:\n${{ env.pr_list }}"
+          gh pr create \
+            --base main \
+            --head qa \
+            --title "$TITLE" \
+            --body "$BODY"
