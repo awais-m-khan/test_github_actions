@@ -33,26 +33,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get merged PRs into qa since last release
-        id: merged_prs
+      - name: Get merged commits from qa since last release
+        id: merged_commits
         run: |
-          PR_LIST=$(gh pr list --base qa --state merged --json number,title,url,mergedAt --jq \
-            '[.[] | select(.mergedAt > "${{ env.last_merged }}") | "- [#" + (.number|tostring) + "](" + .url + "): " + .title] | join("\n")')
+          # Get the list of merge commits in `qa` since the last release.
+          COMMIT_LIST=$(git log --oneline --merges --since="${{ env.last_merged }}" --grep='Merge pull request' --pretty=format:'- [#%h](https://github.com/${{ github.repository }}/commit/%H): %s' )
 
-          if [[ -z "$PR_LIST" ]]; then
-            PR_LIST="No PRs merged since last release."
+          if [[ -z "$COMMIT_LIST" ]]; then
+            COMMIT_LIST="No commits merged since last release."
           fi
 
           # Output the result for later steps
-          echo "::set-output name=pr_titles::$(echo "$PR_LIST" | sed 's/"/\\"/g')"
+          echo "pr_titles=$COMMIT_LIST" >> $GITHUB_ENV
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create PR from qa to main
         run: |
-          # Generate the PR body with Markdown formatting
-          BODY="### Included PRs:\n\n${{ steps.merged_prs.outputs.pr_titles }}"
-          
+          # Construct the body with manual newlines
+          BODY="### Included PRs:\n\n${{ env.pr_titles }}\n\n"
+
           # Create the PR with the formatted title and body
           gh pr create --base main --head qa \
             --title "${{ env.date }} - release ${{ env.count }}" \
