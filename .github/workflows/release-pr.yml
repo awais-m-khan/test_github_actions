@@ -43,8 +43,11 @@ jobs:
             COMMIT_LIST="No commits merged since last release."
           fi
 
-          # Store the commit list in a temporary file (safe for multi-line output)
-          echo "$COMMIT_LIST" > commit_list.txt
+          # Clean up any unwanted \n\n and replace with actual newlines
+          CLEANED_COMMIT_LIST=$(echo "$COMMIT_LIST" | sed ':a;N;$!ba;s/\n\n/\n/g')
+
+          # Store the cleaned commit list in a temporary file (safe for multi-line output)
+          echo "$CLEANED_COMMIT_LIST" > commit_list.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
