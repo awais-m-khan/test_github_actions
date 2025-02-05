@@ -1,111 +1,61 @@
 name: Create Release PR
 
 on:
-  workflow_dispatch: # Trigger manually only
+  workflow_dispatch:
 
 jobs:
   create-release-pr:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout the repository
-        uses: actions/checkout@v4 # Latest version of checkout
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensure full history is fetched
 
-      - name: Set up GitHub CLI
-        uses: actions/setup-gh@v4 # Latest version of setup-gh
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
 
-      - name: Authenticate GitHub CLI
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh auth login --with-token
-
-      - name: Fetch last merge commit from `main`
-        id: last-merge
-        env:
-          GRAPHQL_QUERY: |
-            query($owner: String!, $repo: String!) {
-              repository(owner: $owner, name: $repo) {
-                ref(qualifiedName: "main") {
-                  target {
-                    ... on Commit {
-                      history(first: 1) {
-                        edges {
-                          node {
-                            associatedPullRequests(first: 1) {
-                              edges {
-                                node {
-                                  mergedAt
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
+      - name: Count today's PRs
+        id: pr_count
         run: |
-          response=$(gh api graphql -F owner='${{ github.repository_owner }}' \
-            -F repo='${{ github.event.repository.name }}' \
-            -f query="${GRAPHQL_QUERY}")
-          LAST_MERGE=$(echo "$response" | jq -r '.data.repository.ref.target.history.edges[0].node.associatedPullRequests.edges[0].node.mergedAt')
-          echo "last_merge=$LAST_MERGE" >> $GITHUB_ENV
-
-      - name: Fetch merged PRs into `qa` since last release
-        id: get-merged-prs
+          PR_COUNT=$(gh pr list --base main --state open --search "${{ env.date }} - release" --json title --jq 'length')
+          echo "count=$((PR_COUNT + 1))" >> $GITHUB_ENV
         env:
-          GRAPHQL_QUERY: |
-            query($owner: String!, $repo: String!, $lastMergedDate: DateTime!) {
-              repository(owner: $owner, name: $repo) {
-                ref(qualifiedName: "refs/heads/qa") {
-                  target {
-                    ... on Commit {
-                      history(since: $lastMergedDate) {
-                        edges {
-                          node {
-                            associatedPullRequests(first: 10) { # Adjust `first: 10` for pagination
-                              edges {
-                                node {
-                                  title
-                                  number
-                                  url
-                                  headRefName
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-        run: |
-          response=$(gh api graphql -F owner='${{ github.repository_owner }}' \
-            -F repo='${{ github.event.repository.name }}' \
-            -F lastMergedDate="${{ env.last_merge }}" \
-            -f query="${GRAPHQL_QUERY}")
-          PR_LIST=$(echo "$response" | jq -r '.data.repository.ref.target.history.edges[].node.associatedPullRequests.edges[].node | "- [PR #\(.number)](\(.url)) (\(.headRefName))"')
-          echo "pr_list=$PR_LIST" >> $GITHUB_ENV
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Determine release number for the day
-        id: release-number
+      - name: Find last merged PR from qa to main
+        id: last_merge
         run: |
-          TODAY=$(date +%Y-%m-%d)
-          COUNT=$(gh pr list --search "created:$TODAY is:pr is:open" | wc -l)
-          echo "release_number=$((COUNT + 1))" >> $GITHUB_ENV
-
-      - name: Create Release PR
+          LAST_PR=$(gh pr list --base main --head qa --state merged --limit 1 --json mergedAt --jq '.[0].mergedAt')
+          echo "last_merged=${LAST_PR:-1970-01-01T00:00:00Z}" >> $GITHUB_ENV
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get merged PRs into qa since last release
+        id: merged_prs
         run: |
-          TITLE="Release ${{ steps.release-number.outputs.release_number }} - $(date +%Y-%m-%d)"
-          BODY="### Changes included in this release:\n${{ env.pr_list }}"
-          gh pr create \
-            --base main \
-            --head qa \
-            --title "$TITLE" \
+          PR_LIST=$(gh pr list --base qa --state merged --json number,title,url,mergedAt --jq \
+            '[.[] | select(.mergedAt > "${{ env.last_merged }}") | "- [#" + (.number|tostring) + "](" + .url + "): " + .title] | join("\n")')
+
+          if [[ -z "$PR_LIST" ]]; then
+            PR_LIST="No PRs merged since last release."
+          fi
+
+          # Output the result for later steps
+          echo "::set-output name=pr_titles::$(echo "$PR_LIST" | sed 's/"/\\"/g')"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create PR from qa to main
+        run: |
+          # Generate the PR body with Markdown formatting
+          BODY="### Included PRs:\n\n${{ steps.merged_prs.outputs.pr_titles }}"
+          
+          # Create the PR with the formatted title and body
+          gh pr create --base main --head qa \
+            --title "${{ env.date }} - release ${{ env.count }}" \
             --body "$BODY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
