@@ -39,12 +39,18 @@ jobs:
           # Get the list of PRs merged from `qa` to `main` since the last release
           PR_LIST=$(gh pr list --base main --head qa --state merged --since="${{ env.last_merged }}" --json number,title,url --jq '.[] | "- [#\(.number)](\(.url)): \(.title)"' )
 
+          # Debug output
+          echo "Raw PR list: $PR_LIST"
+
           if [[ -z "$PR_LIST" ]]; then
             PR_LIST="No PRs merged since last release."
           fi
 
           # Clean up unwanted \n\n and ensure the correct newline format
           CLEANED_PR_LIST=$(echo "$PR_LIST" | sed ':a;N;$!ba;s/\n\n/\n/g')
+
+          # Debug output
+          echo "Cleaned PR list: $CLEANED_PR_LIST"
 
           # Store the cleaned PR list in a temporary file (safe for multi-line output)
           echo "$CLEANED_PR_LIST" > pr_list.txt
@@ -55,6 +61,9 @@ jobs:
         run: |
           # Read the cleaned PR list from the temporary file
           BODY=$"- Included PRs:\n$(cat pr_list.txt)\n"
+
+          # Debug output
+          echo "PR body to be created: $BODY"
 
           # Create the PR with the formatted title and body using the $'...' syntax to interpret newlines
           gh pr create --base main --head qa \
