@@ -33,32 +33,32 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get merged commits from qa since last release
-        id: merged_commits
+      - name: Get merged PRs from qa to main since last release
+        id: merged_prs
         run: |
-          # Get the list of merge commits in `qa` since the last release.
-          COMMIT_LIST=$(git log --oneline --merges --since="${{ env.last_merged }}" --grep='Merge pull request' --pretty=format:'- [#%h](https://github.com/${{ github.repository }}/commit/%H): %s' )
+          # Get the list of PRs merged from `qa` to `main` since the last release
+          PR_LIST=$(gh pr list --base main --head qa --state merged --since="${{ env.last_merged }}" --json number,title,url --jq '.[] | "- [#\(.number)](\(.url)): \(.title)"' )
 
-          if [[ -z "$COMMIT_LIST" ]]; then
-            COMMIT_LIST="No commits merged since last release."
+          if [[ -z "$PR_LIST" ]]; then
+            PR_LIST="No PRs merged since last release."
           fi
 
-          # Clean up any unwanted \n\n and replace with actual newlines
-          CLEANED_COMMIT_LIST=$(echo "$COMMIT_LIST" | sed ':a;N;$!ba;s/\n\n/\n/g')
+          # Clean up unwanted \n\n and ensure the correct newline format
+          CLEANED_PR_LIST=$(echo "$PR_LIST" | sed ':a;N;$!ba;s/\n\n/\n/g')
 
-          # Store the cleaned commit list in a temporary file (safe for multi-line output)
-          echo "$CLEANED_COMMIT_LIST" > commit_list.txt
+          # Store the cleaned PR list in a temporary file (safe for multi-line output)
+          echo "$CLEANED_PR_LIST" > pr_list.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create PR from qa to main
         run: |
-          # Read the commit list from the temporary file
-          BODY="### Included PRs:\n\n$(cat commit_list.txt)\n\n"
+          # Read the cleaned PR list from the temporary file
+          BODY=$"- Included PRs:\n$(cat pr_list.txt)\n"
 
-          # Create the PR with the formatted title and body
+          # Create the PR with the formatted title and body using the $'...' syntax to interpret newlines
           gh pr create --base main --head qa \
             --title "${{ env.date }} - release ${{ env.count }}" \
-            --body "$BODY"
+            --body $BODY
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
