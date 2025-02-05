@@ -39,6 +39,9 @@ jobs:
           # Get the list of merge commits in `qa` since the last release.
           COMMIT_LIST=$(git log --oneline --merges --since="${{ env.last_merged }}" --grep='Merge pull request' --pretty=format:'- [#%h](https://github.com/${{ github.repository }}/commit/%H): %s' )
 
+          # Escape any special characters in the commit list
+          COMMIT_LIST=$(echo "$COMMIT_LIST" | sed 's/[&]/\\&/g' | sed 's/"/\\"/g')
+
           if [[ -z "$COMMIT_LIST" ]]; then
             COMMIT_LIST="No commits merged since last release."
           fi
