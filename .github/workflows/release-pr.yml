@@ -39,22 +39,19 @@ jobs:
           # Get the list of merge commits in `qa` since the last release.
           COMMIT_LIST=$(git log --oneline --merges --since="${{ env.last_merged }}" --grep='Merge pull request' --pretty=format:'- [#%h](https://github.com/${{ github.repository }}/commit/%H): %s' )
 
-          # Escape any special characters in the commit list
-          COMMIT_LIST=$(echo "$COMMIT_LIST" | sed 's/[&]/\\&/g' | sed 's/"/\\"/g')
-
           if [[ -z "$COMMIT_LIST" ]]; then
             COMMIT_LIST="No commits merged since last release."
           fi
 
-          # Output the result for later steps
-          echo "pr_titles=$COMMIT_LIST" >> $GITHUB_ENV
+          # Store the commit list in a temporary file (safe for multi-line output)
+          echo "$COMMIT_LIST" > commit_list.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create PR from qa to main
         run: |
-          # Construct the body with manual newlines
-          BODY="### Included PRs:\n\n${{ env.pr_titles }}\n\n"
+          # Read the commit list from the temporary file
+          BODY="### Included PRs:\n\n$(cat commit_list.txt)\n\n"
 
           # Create the PR with the formatted title and body
           gh pr create --base main --head qa \
