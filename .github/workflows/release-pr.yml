@@ -20,8 +20,10 @@ jobs:
       - name: Count today's PRs
         id: pr_count
         run: |
-          PR_COUNT=$(gh pr list --base main --state open --search "${{ env.date }} - release" --json title --jq 'length')
-          echo "count=$((PR_COUNT + 1))" >> $GITHUB_ENV
+          PR_COUNT=$(gh pr list --base main --state merged --search "${{ env.date }} - release" --json title --jq 'length')
+          OPEN_COUNT=$(gh pr list --base main --state open --search "${{ env.date }} - release" --json title --jq 'length')
+          TOTAL_COUNT=$((PR_COUNT + OPEN_COUNT + 1))
+          echo "count=$TOTAL_COUNT" >> $GITHUB_ENV
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
