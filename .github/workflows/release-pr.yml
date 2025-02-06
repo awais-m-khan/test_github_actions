@@ -38,10 +38,10 @@ jobs:
 
           # Iterate over the commits and extract PR numbers
           for COMMIT in $MERGED_COMMITS; do
-            PR_TITLE=$(git log --format=%B -n 1 $COMMIT | grep -oE "Merge pull request #[0-9]+" | awk '{print $4}')
-            if [[ -n "$PR_TITLE" ]]; then
-              PR_INFO=$(gh pr view "$PR_TITLE" --json number,title,url --jq '"- [#\(.number)](\(.url)): \(.title)"')
-              PR_LIST+="$PR_INFO\n"
+            PR_NUMBER=$(git log --format=%B -n 1 $COMMIT | grep -oE "Merge pull request #[0-9]+" | awk '{print $4}')
+            if [[ -n "$PR_NUMBER" ]]; then
+              PR_INFO=$(gh pr view "$PR_NUMBER" --json number,title,url --jq '"- [#\(.number)](\(.url)): \(.title)"')
+              PR_LIST+="$PR_INFO"$'\n'
             fi
           done
 
@@ -49,16 +49,17 @@ jobs:
             PR_LIST="No PRs merged since last release."
           fi
 
-          echo -e "$PR_LIST" > pr_list.txt
+          echo "$PR_LIST" > pr_list.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create PR from qa to main
         run: |
-          BODY=$"- Included PRs:\n$(cat pr_list.txt)\n"
+          BODY=$'- Included PRs:'$'\n'$(cat pr_list.txt)
 
           # Debug output
-          echo "PR body to be created: $BODY"
+          echo "PR body to be created:"
+          echo "$BODY"
 
           # Create the PR with the formatted title and body
           gh pr create --base main --head qa \
