@@ -56,7 +56,7 @@ jobs:
 
       - name: Create PR from qa to main
         run: |
-          BODY=$'- Included PRs:'$'\n'$(cat pr_list.txt)
+          BODY=$'Included PRs:'$'\n'$(cat pr_list.txt)
 
           # Debug output
           echo "PR body to be created:"
