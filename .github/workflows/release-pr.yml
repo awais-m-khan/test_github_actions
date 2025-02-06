@@ -25,28 +25,29 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Find merged PRs from qa to main
+      - name: Find merged PRs from commits in this PR
         id: merged_prs
         run: |
-          # Get the list of commits that came from `qa` to `main`
-          MERGED_COMMITS=$(git log --merges --pretty=format:'%H' origin/main --grep="Merge pull request" -n 20)
+          # Get the list of commits in the qa branch that will be part of the PR
+          COMMIT_LOG=$(git log origin/main..origin/qa --pretty=format:'%H %s')
 
-          echo "Merged commits:"
-          echo "$MERGED_COMMITS"
+          echo "Commit log from qa to main:"
+          echo "$COMMIT_LOG"
 
           PR_LIST=""
 
           # Iterate over the commits and extract PR numbers
-          for COMMIT in $MERGED_COMMITS; do
-            PR_NUMBER=$(git log --format=%B -n 1 $COMMIT | grep -oE "Merge pull request #[0-9]+" | awk '{print $4}')
+          while IFS= read -r line; do
+            COMMIT_HASH=$(echo "$line" | awk '{print $1}')
+            PR_NUMBER=$(echo "$line" | grep -oE "Merge pull request #[0-9]+" | awk '{print $4}')
             if [[ -n "$PR_NUMBER" ]]; then
               PR_INFO=$(gh pr view "$PR_NUMBER" --json number,title,url --jq '"- [#\(.number)](\(.url)): \(.title)"')
               PR_LIST+="$PR_INFO"$'\n'
             fi
-          done
+          done <<< "$COMMIT_LOG"
 
           if [[ -z "$PR_LIST" ]]; then
-            PR_LIST="No PRs merged since last release."
+            PR_LIST="No PRs merged in this release."
           fi
 
           echo "$PR_LIST" > pr_list.txt
