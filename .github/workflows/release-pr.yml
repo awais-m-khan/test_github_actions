@@ -25,49 +25,44 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Find last merged PR from qa to main
-        id: last_merge
-        run: |
-          LAST_PR=$(gh pr list --base main --head qa --state merged --limit 1 --json mergedAt --jq '.[0].mergedAt')
-          echo "last_merged=${LAST_PR:-1970-01-01T00:00:00Z}" >> $GITHUB_ENV
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get merged PRs from qa to main since last release
+      - name: Find merged PRs from qa to main
         id: merged_prs
         run: |
-          # Get the list of PRs merged from `qa` to `main` since the last release
-          PR_LIST=$(gh pr list --base main --head qa --state merged --since="${{ env.last_merged }}" --json number,title,url --jq '.[] | "- [#\(.number)](\(.url)): \(.title)"' )
+          # Get the list of commits that came from `qa` to `main`
+          MERGED_COMMITS=$(git log --merges --pretty=format:'%H' origin/main --grep="Merge pull request" -n 20)
 
-          # Debug output
-          echo "Raw PR list: $PR_LIST"
+          echo "Merged commits:"
+          echo "$MERGED_COMMITS"
+
+          PR_LIST=""
+
+          # Iterate over the commits and extract PR numbers
+          for COMMIT in $MERGED_COMMITS; do
+            PR_TITLE=$(git log --format=%B -n 1 $COMMIT | grep -oE "Merge pull request #[0-9]+" | awk '{print $4}')
+            if [[ -n "$PR_TITLE" ]]; then
+              PR_INFO=$(gh pr view "$PR_TITLE" --json number,title,url --jq '"- [#\(.number)](\(.url)): \(.title)"')
+              PR_LIST+="$PR_INFO\n"
+            fi
+          done
 
           if [[ -z "$PR_LIST" ]]; then
             PR_LIST="No PRs merged since last release."
           fi
 
-          # Clean up unwanted \n\n and ensure the correct newline format
-          CLEANED_PR_LIST=$(echo "$PR_LIST" | sed ':a;N;$!ba;s/\n\n/\n/g')
-
-          # Debug output
-          echo "Cleaned PR list: $CLEANED_PR_LIST"
-
-          # Store the cleaned PR list in a temporary file (safe for multi-line output)
-          echo "$CLEANED_PR_LIST" > pr_list.txt
+          echo -e "$PR_LIST" > pr_list.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create PR from qa to main
         run: |
-          # Read the cleaned PR list from the temporary file
           BODY=$"- Included PRs:\n$(cat pr_list.txt)\n"
 
           # Debug output
           echo "PR body to be created: $BODY"
 
-          # Create the PR with the formatted title and body using the $'...' syntax to interpret newlines
+          # Create the PR with the formatted title and body
           gh pr create --base main --head qa \
             --title "${{ env.date }} - release ${{ env.count }}" \
-            --body $BODY
+            --body "$BODY"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
