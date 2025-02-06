@@ -1,0 +1,70 @@
+name: Create Release PR
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-release-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensure full history is fetched
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+      - name: Count today's PRs
+        id: pr_count
+        run: |
+          PR_COUNT=$(gh pr list --base main --state open --search "${{ env.date }} - release" --json title --jq 'length')
+          echo "count=$((PR_COUNT + 1))" >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find merged PRs from commits in this PR
+        id: merged_prs
+        run: |
+          # Get the list of commits in the qa branch that will be part of the PR
+          COMMIT_LOG=$(git log origin/main..origin/qa --pretty=format:'%H %s')
+
+          echo "Commit log from qa to main:"
+          echo "$COMMIT_LOG"
+
+          PR_LIST=""
+
+          # Iterate over the commits and extract PR numbers
+          while IFS= read -r line; do
+            COMMIT_HASH=$(echo "$line" | awk '{print $1}')
+            PR_NUMBER=$(echo "$line" | grep -oE "Merge pull request #[0-9]+" | awk '{print $4}')
+            if [[ -n "$PR_NUMBER" ]]; then
+              PR_INFO=$(gh pr view "$PR_NUMBER" --json number,title,url --jq '"- [#\(.number)](\(.url)): \(.title)"')
+              PR_LIST+="$PR_INFO"$'\n'
+            fi
+          done <<< "$COMMIT_LOG"
+
+          if [[ -z "$PR_LIST" ]]; then
+            PR_LIST="No PRs merged in this release."
+          fi
+
+          echo "$PR_LIST" > pr_list.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create PR from qa to main
+        run: |
+          BODY=$'Included PRs:'$'\n'$(cat pr_list.txt)
+
+          # Debug output
+          echo "PR body to be created:"
+          echo "$BODY"
+
+          # Create the PR with the formatted title and body
+          gh pr create --base main --head qa \
+            --title "${{ env.date }} - release ${{ env.count }}" \
+            --body "$BODY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
